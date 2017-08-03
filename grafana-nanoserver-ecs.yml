@@ -1,0 +1,498 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  EnvironmentNumber:
+    Type: Number
+    Description: version number of stack
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Name of an existing EC2 key pair to enable SSH access to the ECS
+      instances.
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Select a default VPC ID.
+  SubnetID:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Select a default subnet ID in your selected VPC for the ECS host.
+  LBSubnetID:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Select a default subnet ID in your selected VPC for the Load Balancer.
+  DesiredCapacity:
+    Type: Number
+    Default: '1'
+    Description: Number of instances to launch in your ECS cluster.
+  MaxContainers:
+    Type: Number
+    Default: '2'
+    Description: Maximum number of containers per instance.
+  MinContainers:
+    Type: Number
+    Default: '1'
+    Description: Minimum number of containers per instance.    
+  MaxSize:
+    Type: Number
+    Default: '1'
+    Description: Maximum number of instances that can be launched in your ECS cluster.
+  InstanceType:
+    Description: EC2 instance type
+    Type: String
+    Default: m4.large
+    AllowedValues:
+      - m4.large
+      - m4.xlarge
+    ConstraintDescription: Please choose a valid instance type.
+  DBName:
+    Description: Database name for RDS Postgres instance
+    Type: String
+    Default: grafana
+  DBAllocatedStorage:
+    Description: Database size in GB
+    Type: String
+    Default: "5"
+  DBInstanceClass:
+    Description: Instance size of the database
+    Type: String
+    Default: db.m4.large
+    AllowedValues:
+      - db.m4.large
+      - db.m4.xlarge 
+      - db.m4.2xlarge 
+      - db.m4.4xlarge 
+      - db.m4.10xlarge
+  DBUser:
+    Description: Username to access DB
+    Type: String
+    Default: grafana
+  DBPassword:
+    Description: Password to access DB
+    Type: String
+    Default: grafana123
+    NoEcho: true
+  LBName:
+    Description: Load Balancer Name
+    Type: String
+Description: Grafana on ECS on Windows on Windows Nano Server containers
+Mappings:
+  AWSRegionToAMI:
+    ap-southeast-1:
+      AMIID: ami-724fd811
+    ap-southeast-2:
+      AMIID: ami-bc8895df
+Resources:
+  GrafanaDB: 
+    Type: "AWS::RDS::DBInstance"
+    Properties: 
+      DBName: 
+        Ref: "DBName"
+      DBSubnetGroupName: 
+        Ref: GrafanaDBSubnet
+      AllocatedStorage: 
+        Ref: "DBAllocatedStorage"
+      DBInstanceClass: 
+        Ref: "DBInstanceClass"
+      Engine: "postgres"
+      EngineVersion: "9.6.2"
+      MasterUsername: 
+        Ref: "DBUser"
+      MasterUserPassword: 
+        Ref: "DBPassword"
+      VPCSecurityGroups:
+        -
+          Ref: DBEC2SecurityGroup
+      Tags: 
+        - 
+          Key: "Name"
+          Value: "grafana"
+    DeletionPolicy: "Snapshot"
+  DBEC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Open database for access
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '5432'
+        ToPort: '5432'
+        SourceSecurityGroupId:
+          Ref: EcsSecurityGroup
+      VpcId: !Ref 'VpcId'
+  GrafanaDBSubnet:
+    Type: "AWS::RDS::DBSubnetGroup"
+    Properties: 
+      DBSubnetGroupDescription: Subnet for Grafana RDS DB
+      SubnetIds: !Ref SubnetID
+  EcsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ECS Security Group
+      VpcId: !Ref 'VpcId'
+  EcsSecurityGroupHTTPinbound:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref 'EcsSecurityGroup'
+      IpProtocol: tcp
+      FromPort: '80'
+      ToPort: '80'
+      CidrIp: 0.0.0.0/0
+  EcsSecurityGroupALBports:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref 'EcsSecurityGroup'
+      IpProtocol: tcp
+      FromPort: '1'
+      ToPort: '65535'
+      SourceSecurityGroupId: !Ref 'EcsSecurityGroup'
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+  CloudwatchLogsGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub 'ECSLogGroup-${AWS::StackName}'
+      RetentionInDays: 14
+  taskdefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ContainerDefinitions:
+        - Name: !Sub "${AWS::StackName}-grafana"
+          Cpu: '100'
+          Essential: 'true'
+          Image: davidobrien/nanoserver-grafana:latest
+          Memory: '500'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'CloudwatchLogsGroup'
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: ecs-windows-grafana
+          PortMappings:
+            - ContainerPort: 3000
+          Environment : 
+            - Name: GF_database_type
+              Value: postgres
+            - Name: GF_database_host
+              Value: !GetAtt GrafanaDB.Endpoint.Address
+            - Name: GF_database_user
+              Value: !Ref DBUser
+            - Name: GF_database_password
+              Value: !Ref DBPassword
+      TaskRoleArn: !Ref EcsTaskIamRole
+    DependsOn: GrafanaDB
+  EcsTaskIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: !Sub "${AWS::StackName}-ecs-cloudwatchreadonly"
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - autoscaling:Describe*
+                  - cloudwatch:Describe*
+                  - cloudwatch:Get*
+                  - cloudwatch:List*
+                  - logs:Get*
+                  - logs:Describe*
+                  - logs:TestMetricFilter
+                  - sns:Get*
+                  - sns:List
+                Resource: '*'
+  ECSALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Ref LBName
+      Scheme: internet-facing
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: '30'
+      Subnets: !Ref 'LBSubnetID'
+      SecurityGroups:
+        - !Ref 'EcsSecurityGroup'
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn: ECSServiceRole
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref 'ECSTargetGroup'
+      LoadBalancerArn: !Ref 'ECSALB'
+      Port: '80'
+      Protocol: HTTP
+  ECSALBListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    DependsOn: ALBListener
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref 'ECSTargetGroup'
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /
+      ListenerArn: !Ref 'ALBListener'
+      Priority: 1
+  ECSTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn: ECSALB
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /api/health
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      TargetGroupAttributes:
+      - Key: stickiness.enabled
+        Value: true
+      - Key: stickiness.type
+        Value: lb_cookie
+      - Key: stickiness.lb_cookie.duration_seconds
+        Value: 28800
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref 'VpcId'
+  ECSAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier: !Ref 'SubnetID'
+      LaunchConfigurationName: !Ref 'ContainerInstances'
+      MinSize: '1'
+      MaxSize: !Ref 'MaxSize'
+      DesiredCapacity: !Ref 'DesiredCapacity'
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT15M
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: '1'
+        MaxBatchSize: '1'
+        PauseTime: PT15M
+        WaitOnResourceSignals: 'true'
+  ContainerInstances:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          files:
+            c:\cfn\cfn-hup.conf:
+              content: !Sub '[main]
+
+                stack=${AWS::StackId}
+
+                region=${AWS::Region}
+
+                '
+            c:\cfn\hooks.d\cfn-auto-reloader.conf:
+              content: !Sub '[cfn-auto-reloader-hook]
+
+                triggers=post.update
+
+                path=Resources.ContainerInstances.Metadata.AWS::CloudFormation::Init
+
+                action=cfn-init.exe -v -s ${AWS::StackId} -r ContainerInstances --region
+                ${AWS::Region}
+
+                '
+          services:
+            windows:
+              cfn-hup:
+                enabled: 'true'
+                ensureRunning: 'true'
+                files:
+                  - c:\cfn\cfn-hup.conf
+                  - c:\cfn\hooks.d\cfn-auto-reloader.conf
+    Properties:
+      ImageId: !FindInMap [AWSRegionToAMI, !Ref 'AWS::Region', AMIID]
+      SecurityGroups:
+        - !Ref 'EcsSecurityGroup'
+      InstanceType: !Ref 'InstanceType'
+      IamInstanceProfile: !Ref 'EC2InstanceProfile'
+      KeyName: !Ref 'KeyName'
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: '100'
+            VolumeType: gp2
+      AssociatePublicIpAddress: 'false'
+      UserData: !Base64
+        Fn::Sub: "<powershell> \n # Set agent env variables for the Machine context\
+          \ (durable)\n [Environment]::SetEnvironmentVariable(\"ECS_CLUSTER\", \"\
+          ${ECSCluster}\", \"Machine\")\n$agentVersion = 'v1.14.3';$agentZipUri =\
+          \ \"https://s3.amazonaws.com/amazon-ecs-agent/ecs-agent-windows-$agentVersion.zip\"\
+          ;$agentZipMD5Uri = \"$agentZipUri.md5\";$ecsExeDir = \"$env:ProgramFiles\\\
+          Amazon\\ECS\";$zipFile = \"$env:TEMP\\ecs-agent.zip\";echo \"log\" >> c:\\\
+          windows\\temp\\log1.txt;echo $zipFile >> c:\\windows\\temp\\log1.txt;echo\
+          \ $ecsExeDir >> c:\\windows\\temp\\log1.txt;$md5File = \"$env:TEMP\\ecs-agent.zip.md5\"\
+          ;Invoke-RestMethod -OutFile $zipFile -Uri $agentZipUri;Invoke-RestMethod\
+          \ -OutFile $md5File -Uri $agentZipMD5Uri;$expectedMD5 = (Get-Content $md5File);$md5\
+          \ = New-Object -TypeName System.Security.Cryptography.MD5CryptoServiceProvider;$actualMD5\
+          \ = [System.BitConverter]::ToString($md5.ComputeHash([System.IO.File]::ReadAllBytes($zipFile))).replace(\"\
+          -\", \"\");if($expectedMD5 -ne $actualMD5) {echo \"Download does not match\
+          \ hash.\";echo \"Expected: $expectedMD5 - Got: $actualMD5\";exit 1;};Expand-Archive\
+          \ -Path $zipFile -DestinationPath $ecsExeDir -Force;$jobname = \"ECS-Agent-Init\"\
+          ;$script =  \"cd '$ecsExeDir'; .\\amazon-ecs-agent.ps1\";$repeat = (New-TimeSpan\
+          \ -Minutes 1);$jobpath = $env:LOCALAPPDATA + \"\\Microsoft\\Windows\\PowerShell\\\
+          ScheduledJobs\\$jobname\\ScheduledJobDefinition.xml\";if($(Test-Path -Path\
+          \ $jobpath)) {echo \"Job definition already present\";exit 0;}$scriptblock\
+          \ = [scriptblock]::Create(\"$script\");$trigger = New-JobTrigger -At (Get-Date).Date\
+          \ -RepeatIndefinitely -RepetitionInterval $repeat -Once;$options = New-ScheduledJobOption\
+          \ -RunElevated -ContinueIfGoingOnBattery -StartIfOnBattery;Register-ScheduledJob\
+          \ -Name $jobname -ScriptBlock $scriptblock -Trigger $trigger -ScheduledJobOption\
+          \ $options -RunNow;Add-JobTrigger -Name $jobname -Trigger (New-JobTrigger\
+          \ -AtStartup -RandomDelay 00:1:00);echo $scriptblock >> c:\\windows\\temp\\\
+          log1.txt;echo $trigger >> c:\\windows\\temp\\log1.txt;echo $options >> c:\\\
+          windows\\temp\\log1.txt;# end of script\n cfn-init.exe -v -s ${AWS::StackId}\
+          \ -r ContainerInstances --region ${AWS::Region}\n cfn-signal.exe -e $lastexitcode\
+          \ --stack ${AWS::StackName}   --resource ECSAutoScalingGroup     --region\
+          \ ${AWS::Region}; \n </powershell>\n<persist>true</persist>"
+  service:
+    Type: AWS::ECS::Service
+    DependsOn: ALBListener
+    Properties:
+      Cluster: !Ref 'ECSCluster'
+      DesiredCount: !Ref DesiredCapacity
+      LoadBalancers:
+        - ContainerName: !Sub "${AWS::StackName}-grafana" 
+          ContainerPort: '3000'
+          TargetGroupArn: !Ref 'ECSTargetGroup'
+      Role: !Ref 'ECSServiceRole'
+      TaskDefinition: !Ref 'taskdefinition'
+  ECSServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: !Sub "${AWS::StackName}-ecs-service"
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:DeregisterInstancesFromLoadBalancer
+                  - elasticloadbalancing:DeregisterTargets
+                  - elasticloadbalancing:Describe*
+                  - elasticloadbalancing:RegisterInstancesWithLoadBalancer
+                  - elasticloadbalancing:RegisterTargets
+                  - ec2:Describe*
+                  - ec2:AuthorizeSecurityGroupIngress
+                Resource: '*'
+  ServiceScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    DependsOn: service
+    Properties:
+      MaxCapacity: !Ref MaxContainers
+      MinCapacity: !Ref MinContainers
+      ResourceId: !Sub 'service/${ECSCluster}/${service.Name}'
+      RoleARN: !GetAtt 'AutoscalingRole.Arn'
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+  ServiceScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub "${AWS::StackName}-AStepPolicy"
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref 'ServiceScalingTarget'
+      StepScalingPolicyConfiguration:
+        AdjustmentType: PercentChangeInCapacity
+        Cooldown: 60
+        MetricAggregationType: Average
+        StepAdjustments:
+          - MetricIntervalLowerBound: 0
+            ScalingAdjustment: 200
+  ALB500sAlarmScaleUp:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      EvaluationPeriods: '1'
+      Statistic: Average
+      Threshold: '10'
+      AlarmDescription: Alarm if our ALB generates too many HTTP 500s.
+      Period: '60'
+      AlarmActions:
+        - !Ref 'ServiceScalingPolicy'
+      Namespace: AWS/ApplicationELB
+      Dimensions:
+        - Name: !Sub "${AWS::StackName}-ECSService"
+          Value: !Ref 'service'
+      ComparisonOperator: GreaterThanThreshold
+      MetricName: HTTPCode_ELB_5XX_Count
+  EC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: !Sub "${AWS::StackName}-ecs-service"
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecs:CreateCluster
+                  - ecs:DeregisterContainerInstance
+                  - ecs:DiscoverPollEndpoint
+                  - ecs:Poll
+                  - ecs:RegisterContainerInstance
+                  - ecs:StartTelemetrySession
+                  - ecs:Submit*
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+  AutoscalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - application-autoscaling.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: !Sub "${AWS::StackName}-service-autoscaling"
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - application-autoscaling:*
+                  - cloudwatch:DescribeAlarms
+                  - cloudwatch:PutMetricAlarm
+                  - ecs:DescribeServices
+                  - ecs:UpdateService
+                Resource: '*'
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref 'EC2Role'
+Outputs:
+  ecsservice:
+    Value: !Ref 'service'
+  ecscluster:
+    Value: !Ref 'ECSCluster'
+  ECSALB:
+    Description: Your ALB DNS URL
+    Value: !Sub '${ECSALB.DNSName}'
+  taskdef:
+    Value: !Ref 'taskdefinition'
