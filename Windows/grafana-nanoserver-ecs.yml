@@ -1,8 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Parameters:
-  EnvironmentNumber:
-    Type: Number
-    Description: version number of stack
   KeyName:
     Type: AWS::EC2::KeyPair::KeyName
     Description: Name of an existing EC2 key pair to enable SSH access to the ECS
@@ -69,6 +66,13 @@ Parameters:
     NoEcho: true
   LBName:
     Description: Load Balancer Name
+    Type: String
+  AWS_SECRET_ACCESS_KEY:
+    Description: AWS_SECRET_ACCESS_KEY for containers to access Cloudwatch
+    Type: String
+    NoEcho: true
+  AWS_ACCESS_KEY_ID:
+    Description: AWS_ACCESS_KEY_ID for containers to access Cloudwatch
     Type: String
 Description: Grafana on ECS on Windows on Windows Nano Server containers
 Mappings:
@@ -173,6 +177,12 @@ Resources:
               Value: !Ref DBUser
             - Name: GF_database_password
               Value: !Ref DBPassword
+            - Name: GF_database_name
+              Value: !Ref DBName
+            - Name: AWS_ACCESS_KEY_ID
+              Value: !Ref AWS_ACCESS_KEY_ID
+            - Name: AWS_SECRET_ACCESS_KEY
+              Value: !Ref AWS_SECRET_ACCESS_KEY
       TaskRoleArn: !Ref EcsTaskIamRole
     DependsOn: GrafanaDB
   EcsTaskIamRole:
@@ -183,7 +193,7 @@ Resources:
           - Effect: Allow
             Principal:
               Service:
-                - ec2.amazonaws.com
+                - ecs-tasks.amazonaws.com
             Action:
               - sts:AssumeRole
       Path: /
@@ -323,7 +333,8 @@ Resources:
       UserData: !Base64
         Fn::Sub: "<powershell> \n # Set agent env variables for the Machine context\
           \ (durable)\n [Environment]::SetEnvironmentVariable(\"ECS_CLUSTER\", \"\
-          ${ECSCluster}\", \"Machine\")\n$agentVersion = 'v1.14.3';$agentZipUri =\
+          ${ECSCluster}\", \"Machine\")\n [Environment]::SetEnvironmentVariable(\"ECS_ENABLE_TASK_IAM_ROLE\", \"\
+          true\", \"Machine\") \n$agentVersion = 'v1.14.3';$agentZipUri =\
           \ \"https://s3.amazonaws.com/amazon-ecs-agent/ecs-agent-windows-$agentVersion.zip\"\
           ;$agentZipMD5Uri = \"$agentZipUri.md5\";$ecsExeDir = \"$env:ProgramFiles\\\
           Amazon\\ECS\";$zipFile = \"$env:TEMP\\ecs-agent.zip\";echo \"log\" >> c:\\\
