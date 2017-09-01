@@ -67,11 +67,11 @@ Parameters:
   LBName:
     Description: Load Balancer Name
     Type: String
-  AWS_SECRET_ACCESS_KEY:
+  AWSSECRETACCESSKEY:
     Description: AWS_SECRET_ACCESS_KEY for containers to access Cloudwatch
     Type: String
     NoEcho: true
-  AWS_ACCESS_KEY_ID:
+  AWSACCESSKEYID:
     Description: AWS_ACCESS_KEY_ID for containers to access Cloudwatch
     Type: String
 Description: Grafana on ECS on Windows on Windows Nano Server containers
@@ -180,9 +180,9 @@ Resources:
             - Name: GF_database_name
               Value: !Ref DBName
             - Name: AWS_ACCESS_KEY_ID
-              Value: !Ref AWS_ACCESS_KEY_ID
+              Value: !Ref AWSACCESSKEYID
             - Name: AWS_SECRET_ACCESS_KEY
-              Value: !Ref AWS_SECRET_ACCESS_KEY
+              Value: !Ref AWSSECRETACCESSKEY
       TaskRoleArn: !Ref EcsTaskIamRole
     DependsOn: GrafanaDB
   EcsTaskIamRole:
