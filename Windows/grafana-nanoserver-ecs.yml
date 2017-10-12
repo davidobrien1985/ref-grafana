@@ -9,10 +9,10 @@ Parameters:
     Description: Select a default VPC ID.
   SubnetID:
     Type: List<AWS::EC2::Subnet::Id>
-    Description: Select a default subnet ID in your selected VPC for the ECS host.
+    Description: Select two default subnets ID in your selected VPC for the ECS host.
   LBSubnetID:
     Type: List<AWS::EC2::Subnet::Id>
-    Description: Select a default subnet ID in your selected VPC for the Load Balancer.
+    Description: Select two subnet IDs in your selected VPC for the Load Balancer.
   DesiredCapacity:
     Type: Number
     Default: '1'
@@ -37,10 +37,6 @@ Parameters:
       - m4.large
       - m4.xlarge
     ConstraintDescription: Please choose a valid instance type.
-  DBName:
-    Description: Database name for RDS Postgres instance
-    Type: String
-    Default: grafana
   DBAllocatedStorage:
     Description: Database size in GB
     Type: String
@@ -64,9 +60,6 @@ Parameters:
     Type: String
     Default: grafana123
     NoEcho: true
-  LBName:
-    Description: Load Balancer Name
-    Type: String
   AWSSECRETACCESSKEY:
     Description: AWS_SECRET_ACCESS_KEY for containers to access Cloudwatch
     Type: String
@@ -85,8 +78,7 @@ Resources:
   GrafanaDB: 
     Type: "AWS::RDS::DBInstance"
     Properties: 
-      DBName: 
-        Ref: "DBName"
+      DBName: !Sub "${ AWS::StackName }db"
       DBSubnetGroupName: 
         Ref: GrafanaDBSubnet
       AllocatedStorage: 
@@ -178,7 +170,7 @@ Resources:
             - Name: GF_database_password
               Value: !Ref DBPassword
             - Name: GF_database_name
-              Value: !Ref DBName
+              Value: !Sub ${ AWS::StackName }db
             - Name: AWS_ACCESS_KEY_ID
               Value: !Ref AWSACCESSKEYID
             - Name: AWS_SECRET_ACCESS_KEY
@@ -216,7 +208,7 @@ Resources:
   ECSALB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Name: !Ref LBName
+      Name: !Sub ${ AWS::StackName }-alb
       Scheme: internet-facing
       LoadBalancerAttributes:
         - Key: idle_timeout.timeout_seconds
