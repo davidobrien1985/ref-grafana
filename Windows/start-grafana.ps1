@@ -1,0 +1,1 @@
+[Environment]::SetEnvironmentVariable("GF_database_host", $ENV:GRAFANA_BACKEND_SERVICE_HOST); Get-Variable -Verbose; & c:/grafana-4.5.2/bin/grafana-server.exe
