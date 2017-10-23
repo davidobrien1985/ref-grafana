@@ -24,8 +24,8 @@ spec:
   replicas: 5
   strategy:
     rollingUpdate:
-      maxSurge: 3
-      maxUnavailable: 1
+      maxSurge: 5
+      maxUnavailable: 50%
   minReadySeconds: 5
   template:
     metadata:
