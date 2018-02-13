@@ -60,6 +60,8 @@ spec:
             port: 3000
           initialDelaySeconds: 30
           timeoutSeconds: 30
+      nodeSelector:
+        beta.kubernetes.io/os: windows
 ---
 apiVersion: v1
 kind: Service
@@ -98,3 +100,5 @@ spec:
         image: mustiks/postgres-windows
         ports:
         - containerPort: 5432
+      nodeSelector:
+        beta.kubernetes.io/os: windows
