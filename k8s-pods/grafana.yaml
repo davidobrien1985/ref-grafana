@@ -21,7 +21,7 @@ spec:
     matchLabels:
       app: grafana-app
       tier: grafana-frontend
-  replicas: 5
+  replicas: 10
   strategy:
     rollingUpdate:
       maxSurge: 5
